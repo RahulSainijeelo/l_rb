@@ -41,7 +41,7 @@ pub struct AuthEndpoint<E> {
     ep: E,
 }
 
-#[async_trait::async_trait]
+
 impl<E: Endpoint> Endpoint for AuthEndpoint<E> {
     type Output = Response;
 

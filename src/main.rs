@@ -29,13 +29,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let product_routes = Route::new()
         .at("/", poem::get(handlers::list_products).post(handlers::create_product))
         .at("/:id", poem::delete(handlers::delete_product))
-        .with(AuthMiddleware); // Protect product routes with Auth middleware
+        .with(AuthMiddleware);
+
+    let category_routes = Route::new()
+        .at("/", poem::get(handlers::list_categories).post(handlers::create_category))
+        .with(AuthMiddleware);
 
     let app = Route::new()
         .nest("/api/auth", auth_routes)
         .nest("/api/products", product_routes)
-        .with(Cors::new()) // Enable CORS for Next.js frontend
-        .with(AddData::new(pool)); // Inject DB pool into all handlers
+        .nest("/api/categories", category_routes)
+        .with(Cors::new())
+        .with(AddData::new(pool));
 
     let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let addr = format!("0.0.0.0:{}", port);

@@ -26,6 +26,8 @@ pub struct Product {
     pub description: Option<String>,
     pub price: f64,
     pub stock: i32,
+    pub image_url: Option<String>,
+    pub category_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -36,6 +38,26 @@ pub struct CreateProductRequest {
     pub description: Option<String>,
     pub price: f64,
     pub stock: i32,
+    pub image_url: Option<String>,
+    pub category_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SearchParams {
+    pub q: Option<String>,
+    pub category: Option<Uuid>,
+    pub min_price: Option<f64>,
+    pub max_price: Option<f64>,
+    pub page: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PaginatedProducts {
+    pub data: Vec<Product>,
+    pub total: i64,
+    pub page: i64,
+    pub last_page: i64,
 }
 
 #[derive(Debug, Deserialize)]

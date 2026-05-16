@@ -79,14 +79,93 @@ pub async fn login(
     }))
 }
 
+use poem::web::Query;
+use crate::models::{SearchParams, PaginatedProducts};
+
 #[handler]
-pub async fn list_products(db: Data<&Pool<Postgres>>) -> poem::Result<impl IntoResponse> {
-    let products = sqlx::query_as::<_, Product>("SELECT * FROM products ORDER BY created_at DESC")
+pub async fn list_products(
+    db: Data<&Pool<Postgres>>,
+    Query(params): Query<SearchParams>,
+) -> poem::Result<impl IntoResponse> {
+    let limit = params.limit.unwrap_or(10);
+    let page = params.page.unwrap_or(1);
+    let offset = (page - 1) * limit;
+
+    let search_query = format!("%{}%", params.q.unwrap_or_default());
+    
+    let products = sqlx::query_as::<_, Product>(
+        r#"
+        SELECT * FROM products 
+        WHERE (name ILIKE $1 OR description ILIKE $1)
+        AND ($2::UUID IS NULL OR category_id = $2)
+        AND ($3::FLOAT8 IS NULL OR price >= $3)
+        AND ($4::FLOAT8 IS NULL OR price <= $4)
+        ORDER BY created_at DESC
+        LIMIT $5 OFFSET $6
+        "#,
+    )
+    .bind(search_query.clone())
+    .bind(params.category)
+    .bind(params.min_price)
+    .bind(params.max_price)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(db.0)
+    .await
+    .map_err(|e| poem::Error::from_string(e.to_string(), StatusCode::INTERNAL_SERVER_ERROR))?;
+
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*) FROM products 
+        WHERE (name ILIKE $1 OR description ILIKE $1)
+        AND ($2::UUID IS NULL OR category_id = $2)
+        AND ($3::FLOAT8 IS NULL OR price >= $3)
+        AND ($4::FLOAT8 IS NULL OR price <= $4)
+        "#,
+    )
+    .bind(search_query)
+    .bind(params.category)
+    .bind(params.min_price)
+    .bind(params.max_price)
+    .fetch_one(db.0)
+    .await
+    .map_err(|e| poem::Error::from_string(e.to_string(), StatusCode::INTERNAL_SERVER_ERROR))?;
+
+    Ok(Json(PaginatedProducts {
+        data: products,
+        total,
+        page,
+        last_page: (total as f64 / limit as f64).ceil() as i64,
+    }))
+}
+#[handler]
+pub async fn list_categories(db: Data<&Pool<Postgres>>) -> poem::Result<impl IntoResponse> {
+    let categories = sqlx::query!("SELECT * FROM categories ORDER BY name ASC")
         .fetch_all(db.0)
         .await
         .map_err(|e| poem::Error::from_string(e.to_string(), StatusCode::INTERNAL_SERVER_ERROR))?;
 
-    Ok(Json(products))
+    Ok(Json(categories))
+}
+
+#[handler]
+pub async fn create_category(
+    db: Data<&Pool<Postgres>>,
+    claims: Data<&Claims>,
+    Json(req): Json<serde_json::Value>,
+) -> poem::Result<impl IntoResponse> {
+    if claims.role != "admin" {
+        return Err(poem::Error::from_status(StatusCode::FORBIDDEN));
+    }
+
+    let name = req["name"].as_str().ok_or_else(|| poem::Error::from_status(StatusCode::BAD_REQUEST))?;
+
+    let category = sqlx::query!("INSERT INTO categories (name) VALUES ($1) RETURNING *", name)
+        .fetch_one(db.0)
+        .await
+        .map_err(|e| poem::Error::from_string(e.to_string(), StatusCode::BAD_REQUEST))?;
+
+    Ok(Json(category))
 }
 
 #[handler]
@@ -100,12 +179,18 @@ pub async fn create_product(
     }
 
     let product = sqlx::query_as::<_, Product>(
-        "INSERT INTO products (name, description, price, stock) VALUES ($1, $2, $3, $4) RETURNING *",
+        r#"
+        INSERT INTO products (name, description, price, stock, image_url, category_id) 
+        VALUES ($1, $2, $3, $4, $5, $6) 
+        RETURNING *
+        "#,
     )
     .bind(req.name)
     .bind(req.description)
     .bind(req.price)
     .bind(req.stock)
+    .bind(req.image_url)
+    .bind(req.category_id)
     .fetch_one(db.0)
     .await
     .map_err(|e| poem::Error::from_string(e.to_string(), StatusCode::INTERNAL_SERVER_ERROR))?;
